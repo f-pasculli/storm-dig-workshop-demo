@@ -1,0 +1,241 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Compute layer
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: EC2 instance type
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+    ConstraintDescription: 'Valori permessi: [t3.micro, t3.small, t3.medium]'
+Resources:
+  KeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: !Join
+        - '-'
+        - - ec2-keypair
+          - !ImportValue params:prj
+          - !ImportValue params:env
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - ec2-keypair
+              - !ImportValue params:prj
+              - !ImportValue params:env
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+  LaunchTemplate:
+      Type: AWS::EC2::LaunchTemplate
+      Properties:
+        LaunchTemplateName: !Join
+          - '-'
+          - - alb-launch-template
+            - !ImportValue params:prj
+            - !ImportValue params:env
+        LaunchTemplateData:
+          InstanceType: !Ref InstanceType
+          ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
+          KeyName: !Ref KeyPair
+          SecurityGroupIds:
+            - !ImportValue params:ec2-sg
+          IamInstanceProfile: 
+            Name: !ImportValue params:bh-iam-instance-profile
+          UserData: !Base64
+            Fn::Sub:
+              - |
+                #!/bin/bash
+
+                sudo yum update -y
+                sudo yum install -y python3-pip aws-cli
+
+                sudo pip3 install flask pymysql flask-cors
+
+                # Imposta le variabili
+                DB_ENDPOINT="${DB_ENDPOINT}"
+                DB_NAME="${DB_NAME}"
+                DB_USER="${DB_USER}"
+                REGION="${REGION}"
+                RDS_DB_PASSWORD_SECRET_ID="${RDS_DB_PASSWORD_SECRET_ID}"
+                S3_APP_ZIP_PATH="${S3_APP_ZIP_PATH}"
+
+                # Recupera la password del database da AWS Secrets Manager
+                DB_PASSWORD=$(aws secretsmanager get-secret-value --region "${REGION}" --secret-id "${RDS_DB_PASSWORD_SECRET_ID}" --query SecretString --output text)
+
+                # Scarica l'applicazione Python da S3
+                aws s3 cp s3://"${S3_APP_ZIP_PATH}"/app.py /home/ec2-user/app.py
+
+                # Rendi eseguibile lo script Python
+                chmod +x /home/ec2-user/app.py
+
+                # Esporta le variabili d'ambiente
+                export DB_ENDPOINT
+                export DB_NAME
+                export DB_USER
+                export DB_PASSWORD
+
+                # Avvia l'applicazione in background e reindirizza l'output ai log
+                nohup python3 /home/ec2-user/app.py > /home/ec2-user/app.log 2>&1 &
+                
+              - DB_ENDPOINT: !ImportValue params:rds-endpoint
+                DB_NAME: !ImportValue params:rds-db-name
+                DB_USER: !ImportValue params:rds-db-user
+                REGION: !ImportValue params:region
+                RDS_DB_PASSWORD_SECRET_ID: !ImportValue params:rds-db-password
+                S3_APP_ZIP_PATH: !ImportValue params:frontend-bucket-arn
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join
+        - '-'
+        - - alb-tg
+          - !ImportValue params:prj
+          - !ImportValue params:env
+      VpcId: !ImportValue params:vpc
+      Port: 80
+      Protocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200-399
+      TargetType: instance
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - alb-tg
+              - !ImportValue params:prj
+              - !ImportValue params:env
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !ImportValue params:private-subnet-a
+        - !ImportValue params:private-subnet-b
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 4
+      DesiredCapacity: 2
+      TargetGroupARNs:
+        - !Ref ALBTargetGroup
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - alb-asg-ec2
+              - !ImportValue params:prj
+              - !ImportValue params:env
+          PropagateAtLaunch: true
+        - Key: Project
+          Value: !ImportValue params:prj
+          PropagateAtLaunch: true
+        - Key: Environment
+          Value: !ImportValue params:env
+          PropagateAtLaunch: true
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Join
+        - '-'
+        - - alb
+          - !ImportValue params:prj
+          - !ImportValue params:env
+      Subnets:
+        - !ImportValue params:public-subnet-a
+        - !ImportValue params:public-subnet-b
+      SecurityGroups:
+        - !ImportValue params:alb-sg
+      Scheme: internet-facing
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - alb
+              - !ImportValue params:prj
+              - !ImportValue params:env
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      KeyName: !Ref KeyPair
+      SubnetId: !ImportValue params:public-subnet-a
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
+      SecurityGroupIds:
+        - !ImportValue params:alb-sg
+        - !ImportValue params:ec2-sg
+      IamInstanceProfile: !ImportValue params:bh-iam-instance-profile
+      UserData: !Base64
+        Fn::Sub:
+          - |
+            #!/bin/bash
+            
+            DB_ENDPOINT="${DB_ENDPOINT}"
+            DB_NAME="${DB_NAME}"
+            DB_USER="${DB_USER}"
+            REGION="${REGION}"
+            RDS_DB_PASSWORD_SECRET_ID="${RDS_DB_PASSWORD_SECRET_ID}"
+            
+            DB_PASSWORD=$(aws secretsmanager get-secret-value --region "${REGION}" --secret-id "${RDS_DB_PASSWORD_SECRET_ID}" --query SecretString --output text)
+            
+            yum update -y
+            yum install -y mysql
+            
+            service mysqld start
+            
+            yum install -y python3 python3-pip
+            pip3 install pymysql
+            
+            mysql -h $DB_ENDPOINT -u $DB_USER -p$DB_PASSWORD <<EOF
+            USE $DB_NAME;
+            CREATE TABLE IF NOT EXISTS example_table (id INT AUTO_INCREMENT PRIMARY KEY,animale VARCHAR(255) NOT NULL,verso VARCHAR(255) NOT NULL);
+            INSERT INTO example_table (animale, verso) VALUES ('gatto', 'miao'), ('cane', 'bau');
+            EOF
+            
+          - DB_ENDPOINT: !ImportValue params:rds-endpoint
+            DB_NAME: !ImportValue params:rds-db-name
+            DB_USER: !ImportValue params:rds-db-user
+            REGION: !ImportValue params:region
+            RDS_DB_PASSWORD_SECRET_ID: !ImportValue params:rds-db-password
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - bh
+              - !ImportValue params:prj
+              - !ImportValue params:env
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+Outputs:
+  ALBUrl:
+    Description: ALB url
+    Value: !Sub http://${ALB.DNSName}

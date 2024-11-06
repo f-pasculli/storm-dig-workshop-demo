@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Data layer
+
+Parameters:
+  Env:
+    Description: Identificatore dell'ambiente
+    Type: String
+    Default: test
+  DBInstanceIdentifier:
+    Description: Identificatore dell'istanza RDS
+    Type: String
+    Default: mysql-instance-workshop
+  DBName:
+    Description: Nome del database
+    Type: String
+    Default: mydatabase
+  DBUser:
+    Description: Nome utente del database
+    Type: String
+    Default: admin
+  DBPassword:
+    Description: Password del database
+    Type: String
+    Default: password
+    NoEcho: true
+    MaxLength: 41
+    MinLength: 8
+  DBAllocatedStorage:
+    Description: Dimensione dello storage allocato (GB)
+    Type: Number
+    Default: 20
+  DBInstanceClass:
+    Description: Tipo di istanza RDS
+    Type: String
+    Default: db.m5.large
+    AllowedValues:
+      - db.t3.small
+      - db.t3.medium
+      - db.m5.large
+
+Resources:
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets for RDS instance
+      SubnetIds:
+        - !ImportValue params:private-subnet-a
+        - !ImportValue params:private-subnet-b
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['rds-subnet-group', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+  
+  MyDBInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBInstanceIdentifier: !Join ['-', ['rds', !ImportValue params:prj, !ImportValue params:env ] ]
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: 'mysql'
+      MasterUsername: !Ref DBUser
+      MasterUserPassword: !Ref DBPassword
+      DBName: !Ref DBName
+      VPCSecurityGroups:
+        - !ImportValue params:rds-sg
+      DBSubnetGroupName:
+        Ref: DBSubnetGroup
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 0
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['rds', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+    
+  RDSDBPassword:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Name: !Join ['/', ['RDS/DB/password', !ImportValue params:prj, !ImportValue params:env ] ]
+      SecretString: !Ref DBPassword
+
+Outputs:        
+  DBEndpoint:
+    Description: Endpoint del database
+    Value: !GetAtt MyDBInstance.Endpoint.Address
+    Export:
+      Name: params:rds-endpoint
+  DBName:
+    Description: Nome del database
+    Value: !Ref DBName
+    Export:
+      Name: params:rds-db-name
+  DBUser:
+    Description: Nome utente del database
+    Value: !Ref DBUser
+    Export:
+      Name: params:rds-db-user
+  DBPassword:
+    Description: Password del database
+    Value: !Ref RDSDBPassword
+    Export:
+      Name: params:rds-db-password

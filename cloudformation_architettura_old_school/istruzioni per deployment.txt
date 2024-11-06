@@ -1,0 +1,8 @@
+
+la key_pair deve essere già presente sull'account
+
+gli stack vanno lanciati in ordine.
+dopo aver creato il bucket (04_app_code_layer.yaml) e prima di lanciare 05_compute_layer.yaml bisogna caricare sul bucket il file app.py
+dopo aver creato lo stack 05_compute_layer.yaml bisogna inserire nel file index.html l'URL del ALB e poi caricarlo sul bucket.
+
+serverless richiede anche meno risorse (subnet pubbliche, nat gw, etc).

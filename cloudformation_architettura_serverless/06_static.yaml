@@ -1,0 +1,41 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template per il contenuto statico della web-app senza CloudFront.
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join 
+        - '-'
+        - - frontend-bucket
+          - !ImportValue params:prj
+          - !ImportValue params:env
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowPublicRead
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub '${S3Bucket.Arn}/*'
+
+Outputs:
+  WebsiteURL:
+    Description: URL del sito web statico
+    Value: !GetAtt S3Bucket.WebsiteURL
+    Export:
+      Name: params:website-url
+  ExportedS3BucketName:
+    Description: Nome del bucket S3 per il contenuto statico
+    Value: !Ref S3Bucket
+    Export:
+      Name: params:frontend-bucket-name

@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Compute layer for serverless architecture
+
+Resources:
+  ### Lambda Function ###
+  MyLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join ['-', ['lambda', !ImportValue params:prj, !ImportValue params:env]]
+      Runtime: python3.9
+      Handler: app.lambda_handler
+      Role: !ImportValue params:lambda-execution-role-arn
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !ImportValue params:dynamodb-table-name
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          from boto3.dynamodb.conditions import Key, Attr
+
+          dynamodb = boto3.resource('dynamodb')
+          table_name = os.environ.get('DYNAMODB_TABLE_NAME', 'myDynamoDBTable')
+          table = dynamodb.Table(table_name)
+
+          def lambda_handler(event, context):
+              http_method = event['httpMethod']
+              path = event['resource']
+
+              if path == '/items' and http_method == 'GET':
+                  return get_items(event)
+              elif path == '/items' and http_method == 'POST':
+                  return add_item(event)
+              elif path == '/items/{animale}' and http_method == 'PUT':
+                  return update_item(event)
+              elif path == '/items/{animale}' and http_method == 'DELETE':
+                  return delete_item(event)
+              else:
+                  return {
+                      'statusCode': 404,
+                      'body': json.dumps({'error': 'Not Found'}),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+
+          def get_items(event):
+              try:
+                  response = table.scan()
+                  items = response.get('Items', [])
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(items),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)}),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+
+          def add_item(event):
+              try:
+                  data = json.loads(event['body'])
+                  animale = data.get('animale')
+                  verso = data.get('verso')
+                  if not animale or not verso:
+                      return {
+                          'statusCode': 400,
+                          'body': json.dumps({'error': 'Input non valido'}),
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*'
+                          }
+                      }
+                  # Controlla se l'animale esiste già
+                  response = table.get_item(Key={'animale': animale})
+                  if 'Item' in response:
+                      return {
+                          'statusCode': 409,
+                          'body': json.dumps({'error': 'Elemento già esistente'}),
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*'
+                          }
+                      }
+                  # Inserisce il nuovo elemento
+                  table.put_item(Item={'animale': animale, 'verso': verso})
+                  return {
+                      'statusCode': 201,
+                      'body': json.dumps({'message': 'Elemento aggiunto'}),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)}),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+
+          def update_item(event):
+              try:
+                  animale = event['pathParameters']['animale']
+                  data = json.loads(event['body'])
+                  verso = data.get('verso')
+                  if not verso:
+                      return {
+                          'statusCode': 400,
+                          'body': json.dumps({'error': 'Input non valido'}),
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*'
+                          }
+                      }
+                  # Controlla se l'elemento esiste
+                  response = table.get_item(Key={'animale': animale})
+                  if 'Item' not in response:
+                      return {
+                          'statusCode': 404,
+                          'body': json.dumps({'error': 'Elemento non esistente'}),
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*'
+                          }
+                      }
+                  # Aggiorna l'elemento
+                  table.update_item(
+                      Key={'animale': animale},
+                      UpdateExpression='SET verso = :val',
+                      ExpressionAttributeValues={':val': verso}
+                  )
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({'message': 'Elemento aggiornato'}),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)}),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+
+          def delete_item(event):
+              try:
+                  animale = event['pathParameters']['animale']
+                  # Controlla se l'elemento esiste
+                  response = table.get_item(Key={'animale': animale})
+                  if 'Item' not in response:
+                      return {
+                          'statusCode': 404,
+                          'body': json.dumps({'error': 'Elemento non esistente'}),
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*'
+                          }
+                      }
+                  # Elimina l'elemento
+                  table.delete_item(Key={'animale': animale})
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({'message': 'Elemento eliminato'}),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)}),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+Outputs:
+  ExportedLambdaName:
+    Description: "Lambda name"
+    Value: !GetAtt MyLambdaFunction.Arn
+    Export:
+      Name: params:lambda-function-arn

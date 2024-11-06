@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Data layer for serverless architecture
+
+
+Resources:
+  MyDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !ImportValue params:dynamodb-table-name
+      AttributeDefinitions:
+        - AttributeName: animale
+          AttributeType: S
+      KeySchema:
+        - AttributeName: animale
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - Key: Name
+          Value: !ImportValue params:dynamodb-table-name
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env

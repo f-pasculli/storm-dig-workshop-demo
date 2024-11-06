@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Network layer
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    AllowedValues:
+      - 10.0.0.0/16
+    Description: CIDR block for the VPC
+  PublicSubnetACidr:
+    Type: String
+    Default: 10.0.1.0/24
+    AllowedValues:
+      - 10.0.1.0/24
+    Description: CIDR block for the public subnet
+  PublicSubnetBCidr:
+    Type: String
+    Default: 10.0.2.0/24
+    AllowedValues:
+      - 10.0.2.0/24
+    Description: CIDR block for the public subnet
+  PrivateSubnetACidr:
+    Type: String
+    Default: 10.0.3.0/24
+    AllowedValues:
+      - 10.0.3.0/24
+    Description: CIDR block for the first private subnet
+  PrivateSubnetBCidr:
+    Type: String
+    Default: 10.0.4.0/24
+    AllowedValues:
+      - 10.0.4.0/24
+    Description: CIDR block for the second private subnet
+
+Resources:
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['vpc', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['igw', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  ##############################################
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetACidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['public-subnet-a', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetBCidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [1, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['public-subnet-b', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+  
+  PublicRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['public-rt-a', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  PublicRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['public-rt-b', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+  
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTableA
+  
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTableB
+
+  DefaultPublicRouteA:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  DefaultPublicRouteB:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  ##############################################
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetACidr
+      AvailabilityZone: !Select [0, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['private-subnet-a', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+  
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetBCidr
+      AvailabilityZone: !Select [1, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['private-subnet-b', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  NatGatewayEIPA:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    DependsOn: NatGatewayEIPA
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIPA.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['ng-a', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  NatGatewayEIPB:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    DependsOn: NatGatewayEIPB
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIPB.AllocationId
+      SubnetId: !Ref PublicSubnetB
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['ng-b', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['private-rt-a', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join ['-', ['private-rt-b', !ImportValue params:prj, !ImportValue params:env ] ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTableA
+
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTableB
+
+  PrivateRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+
+  PrivateRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayB
+
+Outputs:
+  ExportedVPCId:
+    Description: "VPC ID"
+    Value: !Ref VPC
+    Export:
+      Name: params:vpc  
+
+  ExportedPublicSubnetAId:
+    Description: "Public subnet A ID"
+    Value: !Ref PublicSubnetA
+    Export:
+      Name: params:public-subnet-a  
+
+  ExportedPublicSubnetBId:
+    Description: "Public subnet B ID"
+    Value: !Ref PublicSubnetB
+    Export:
+      Name: params:public-subnet-b  
+
+  ExportedPrivateSubnetAId:
+    Description: "Private subnet A ID"
+    Value: !Ref PrivateSubnetA
+    Export:
+      Name: params:private-subnet-a  
+
+  ExportedPrivateSubnetBId:
+    Description: "Private subnet B ID"
+    Value: !Ref PrivateSubnetB
+    Export:
+      Name: params:private-subnet-b  

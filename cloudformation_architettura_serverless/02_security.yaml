@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Security layer for serverless architecture
+
+Resources:
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Join ['-', ['LambdaExecutionRole', !ImportValue params:prj, !ImportValue params:env]]
+      Description: IAM role for Lambda functions
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: !Join ['-', ['LambdaDynamoDBPolicy', !ImportValue params:prj, !ImportValue params:env]]
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub
+                      - 'arn:aws:dynamodb:${Region}:${AWS::AccountId}:table/${TableName}'
+                      - Region: !ImportValue params:region
+                        TableName: !ImportValue params:dynamodb-table-name
+
+
+Outputs:
+  ExportedLambdaExecutionRoleArn:
+    Description: "Lambda Execution Role ARN"
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: params:lambda-execution-role-arn

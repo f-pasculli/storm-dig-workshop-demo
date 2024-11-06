@@ -1,0 +1,148 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Security layer
+
+Resources:
+  ALBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Accesso ALB
+      VpcId: !ImportValue params:vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: "10.0.0.0/16"
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          CidrIp: "10.0.0.0/16"
+      Tags:
+        - Key: Name
+          Value:
+            !Join [
+              "-",
+              ["ALB-sg", !ImportValue params:prj, !ImportValue params:env],
+            ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  EC2SecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Accesso alle istanze EC2 private
+      VpcId: !ImportValue params:vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: "10.0.0.0/16"
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          CidrIp: "10.0.0.0/16"
+      Tags:
+        - Key: Name
+          Value:
+            !Join [
+              "-",
+              ["EC2-sg", !ImportValue params:prj, !ImportValue params:env],
+            ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  RDSSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Accesso alla istanza RDS
+      VpcId: !ImportValue params:vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value:
+            !Join [
+              "-",
+              ["RDS-sg", !ImportValue params:prj, !ImportValue params:env],
+            ]
+        - Key: Project
+          Value: !ImportValue params:prj
+        - Key: Environment
+          Value: !ImportValue params:env
+
+  BHIamRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: EC2RoleForBH
+      Description: EC2 IAM role for SSM access
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+  
+  SecretReadPolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: SecretManagerReadOnlyAccessPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "secretsmanager:GetSecretValue"
+            Resource: "*"
+      Roles:
+        - Ref: BHIamRole
+
+  BHInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      InstanceProfileName: "BHInstanceProfile"
+      Roles:
+        - Ref: BHIamRole
+
+Outputs:
+  ExportedEC2SG:
+    Description: "EC2 SG ID"
+    Value: !Ref EC2SecurityGroup
+    Export:
+      Name: params:ec2-sg
+
+  ExportedALBSG:
+    Description: "ALB SG ID"
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: params:alb-sg
+
+  ExportedRDSSG:
+    Description: "RDS SG ID"
+    Value: !Ref RDSSecurityGroup
+    Export:
+      Name: params:rds-sg
+
+  ExportedBHIAMRoleInstanceProfile:
+    Description: "BH IAM Role Instance Profile"
+    Value: !Ref BHInstanceProfile
+    Export:
+      Name: params:bh-iam-instance-profile

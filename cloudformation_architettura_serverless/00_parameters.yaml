@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template per creare variabili testuali da usare in altri template CloudFormation (export) per l'architettura serverless
+
+Parameters:
+  Environment:
+    Type: String
+    Default: "dev"
+    Description: "Ambiente di deployment"
+    AllowedValues:
+      - dev
+      - test
+      - qa
+      - uat
+      - prod
+    ConstraintDescription: "Valori permessi: dev, test, qa, uat, prod"
+
+  Project:
+    Type: String
+    Default: "storm-dig-workshop-serverless"
+    Description: "Nome progetto"
+  
+  DynamoDBTableName:
+    Description: Nome della tabella DynamoDB
+    Type: String
+    Default: storm-dig-workshop-dynamo-table
+
+Resources:
+  Parameters:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Sub "/00_parameters_serverless"
+      Type: "String"
+      Value: !Sub '{"environment": "${Environment}", "project": "${Project}"}, "dynamodb-table-name" : "${DynamoDBTableName}}'
+
+Outputs:
+  ExportedEnvironment:
+    Description: "Ambiente di deployment"
+    Value: !Ref Environment
+    Export:
+      Name: params:env
+  ExportedProject:
+    Description: "Nome del progetto"
+    Value: !Ref Project
+    Export:
+      Name: params:prj
+  ExportedRegion:
+    Description: "Region utilizzata"
+    Value: !Ref "AWS::Region"
+    Export:
+      Name: params:region
+  ExportedDynamoDBTableName:
+    Description: Nome della tabella DynamoDB
+    Value: !Ref DynamoDBTableName
+    Export:
+      Name: params:dynamodb-table-name
